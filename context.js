@@ -58,27 +58,51 @@ Context.prototype.frame = function(cb) {
   });
 };
 
-Context.prototype.submit = function (opts) {
+Context.prototype.submit = function (opts, subpass) {
   const commandEncoder = this.defaultCommandEncoder
-  // TODO: default screen texture injection
-  if (!opts.pass.color) {
-    const textureView = this.swapChain.getCurrentTexture().createView();
-    opts.pass.colorAttachments[0].attachment = textureView
+
+  if (opts.pass) {
+    // TODO: default screen texture injection
+    if (!opts.pass.color) {
+      const textureView = this.swapChain.getCurrentTexture().createView();
+      opts.pass.colorAttachments[0].attachment = textureView
+    }
+    this.passEncoder = commandEncoder.beginRenderPass(opts.pass);    
   }
-  const passEncoder = commandEncoder.beginRenderPass(opts.pass);
-  for (var i = 0; i < opts.attributes.length; i++) {
-    passEncoder.setVertexBuffer(i, opts.attributes[i])
+  const passEncoder = this.passEncoder
+
+  if (opts.attributes) {
+    for (var i = 0; i < opts.attributes.length; i++) {
+      passEncoder.setVertexBuffer(i, opts.attributes[i])
+    }
   }
+
   if (opts.indices) {
     passEncoder.setIndexBuffer(opts.indices);
   }
-  for (var i = 0; i < opts.uniforms.length; i++) {
-    passEncoder.setBindGroup(i, opts.uniforms[i])
-  }
-  passEncoder.setPipeline(opts.pipeline);
 
-  passEncoder.drawIndexed(opts.count, opts.instances || 1, 0, 0, 0);
-  passEncoder.endPass();    
+  if (opts.uniforms) {
+    for (var i = 0; i < opts.uniforms.length; i++) {
+      passEncoder.setBindGroup(i, opts.uniforms[i])
+    }
+  }
+
+  if (opts.pipeline) {
+    passEncoder.setPipeline(opts.pipeline);
+  }
+
+  if (opts.count) {
+    passEncoder.drawIndexed(opts.count, opts.instances || 1, 0, 0, 0);
+  }
+
+  if (subpass) {
+    subpass()
+  }
+
+  if (opts.pass) {
+    passEncoder.endPass();   
+    this.passEncoder = null
+  }  
 }
 
 Context.prototype.dispose = function() {
@@ -213,6 +237,8 @@ Context.prototype.sampler = function (opts) {
   const sampler = this.device.createSampler({
     magFilter: opts.min,
     minFilter: opts.mag,
+    addressModeU: "repeat",
+    addressModeV: "repeat",
     mipmapFilter: opts.mipmap ? "linear" : "nearest"
   });
   return sampler
