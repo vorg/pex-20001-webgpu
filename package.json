@@ -1,0 +1,26 @@
+{
+  "name": "pex-20001-webgpu",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "budo test5.js:bundle.js --live"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@webgpu/glslang": "0.0.12",
+    "budo": "^11.6.3",
+    "pex-cam": "^2.7.1",
+    "pex-context": "^2.10.2",
+    "pex-math": "^3.0.0-4",
+    "primitive-cube": "^2.0.1",
+    "primitive-sphere": "^3.0.0",
+    "primitive-torus": "^1.0.4",
+    "ramda": "^0.26.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.7.7",
+    "babelify": "^7.3.0"
+  }
+}
