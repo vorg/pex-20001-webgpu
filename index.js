@@ -203,6 +203,7 @@ async function init() {
     mat4.rotate(modelMatrixTorus, time / 1000, [0, 1, 0]);    
     mat4.rotate(modelMatrixTorus, Math.PI / 2, [1, 0, 0]);    
 
+    // TODO: uniform updates should be batched somehow
     ctx.update(optsUniformBuffer, { offset: 0, data: modelMatrix })
     ctx.update(optsUniformBuffer, { offset: mat4Size, data: new Float32Array([1, 1]) }) //TODO: GC
 

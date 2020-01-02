@@ -1,4 +1,4 @@
-// Written agains Chrome Canary Version 81.0.4014.0 
+// Written agains Chrome Canary Version 81.0.4014.0
 
 function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   this.gpu = gpu;
@@ -28,19 +28,19 @@ function Context({ width, height, gpu, adapter, device, glslangimpl }) {
 
   this.Filter = {
     Linear: "linear"
-  }
+  };
 
   this.BindingType = {
     UniformBuffer: "uniform-buffer",
     Sampler: "sampler",
-    SampledTexture: "sampled-texture",
-  }
+    SampledTexture: "sampled-texture"
+  };
 
   this.ShaderStage = {
     Vertex: 0x01,
     Fragment: 0x02,
     Compute: 0x04
-  }
+  };
 }
 
 Context.prototype.frame = function(cb) {
@@ -51,29 +51,27 @@ Context.prototype.frame = function(cb) {
       // interrupt render loop
       return;
     }
-    self.device.defaultQueue.submit([
-      self.defaultCommandEncoder.finish()
-    ]);
+    self.device.defaultQueue.submit([self.defaultCommandEncoder.finish()]);
     requestAnimationFrame(frame);
   });
 };
 
-Context.prototype.submit = function (opts, subpass) {
-  const commandEncoder = this.defaultCommandEncoder
+Context.prototype.submit = function(opts, subpass) {
+  const commandEncoder = this.defaultCommandEncoder;
 
   if (opts.pass) {
     // TODO: default screen texture injection
     if (!opts.pass.color) {
       const textureView = this.swapChain.getCurrentTexture().createView();
-      opts.pass.colorAttachments[0].attachment = textureView
+      opts.pass.colorAttachments[0].attachment = textureView;
     }
-    this.passEncoder = commandEncoder.beginRenderPass(opts.pass);    
+    this.passEncoder = commandEncoder.beginRenderPass(opts.pass);
   }
-  const passEncoder = this.passEncoder
+  const passEncoder = this.passEncoder;
 
   if (opts.attributes) {
     for (var i = 0; i < opts.attributes.length; i++) {
-      passEncoder.setVertexBuffer(i, opts.attributes[i])
+      passEncoder.setVertexBuffer(i, opts.attributes[i]);
     }
   }
 
@@ -83,7 +81,7 @@ Context.prototype.submit = function (opts, subpass) {
 
   if (opts.uniforms) {
     for (var i = 0; i < opts.uniforms.length; i++) {
-      passEncoder.setBindGroup(i, opts.uniforms[i])
+      passEncoder.setBindGroup(i, opts.uniforms[i]);
     }
   }
 
@@ -96,14 +94,14 @@ Context.prototype.submit = function (opts, subpass) {
   }
 
   if (subpass) {
-    subpass()
+    subpass();
   }
 
   if (opts.pass) {
-    passEncoder.endPass();   
-    this.passEncoder = null
-  }  
-}
+    passEncoder.endPass();
+    this.passEncoder = null;
+  }
+};
 
 Context.prototype.dispose = function() {
   this.disposed = true;
@@ -172,23 +170,22 @@ Context.prototype.uniformBuffer = function(opts) {
     size: size,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
   };
-  let uniformBuffer = this.device.createBuffer(bufferDescriptor);
-  uniformBuffer._update = function (opts) {
-    // TODO: this is deprecated in newest API
-    uniformBuffer.setSubData(opts.offset, opts.data)    
-  }
+  let uniformBuffer = this.device.createBuffer(bufferDescriptor);  
+  uniformBuffer._update = (opts) => {
+    bufferSubData(this.device, uniformBuffer, opts.offset, opts.data)
+  };
 
   return uniformBuffer;
 };
 
-Context.prototype.update = function (resource, opts) {
+Context.prototype.update = function(resource, opts) {
   if (resource._update) {
-    resource._update(opts)
+    resource._update(opts);
   } else {
-    console.error(resource, `does not implement _update()`)
-    throw new Error(`${resource} does not implement _update()`)
+    console.error(resource, `does not implement _update()`);
+    throw new Error(`${resource} does not implement _update()`);
   }
-}
+};
 
 Context.prototype.shader = function(opts) {
   let type = "";
@@ -211,12 +208,17 @@ Context.prototype.shader = function(opts) {
   return shaderModule;
 };
 
-Context.prototype.pass = function (opts) {
-  const clearColor = opts.clearColor || [1, 1, 1, 1]
+Context.prototype.pass = function(opts) {
+  const clearColor = opts.clearColor || [1, 1, 1, 1];
   const renderPassDescriptor = {
     colorAttachments: [
       {
-        loadValue: { r: clearColor[0], g: clearColor[1], b: clearColor[2], a: clearColor[3] }
+        loadValue: {
+          r: clearColor[0],
+          g: clearColor[1],
+          b: clearColor[2],
+          a: clearColor[3]
+        }
       }
     ],
     depthStencilAttachment: {
@@ -230,10 +232,10 @@ Context.prototype.pass = function (opts) {
     }
   };
 
-  return renderPassDescriptor
-}
+  return renderPassDescriptor;
+};
 
-Context.prototype.sampler = function (opts) {
+Context.prototype.sampler = function(opts) {
   const sampler = this.device.createSampler({
     magFilter: opts.min,
     minFilter: opts.mag,
@@ -241,42 +243,42 @@ Context.prototype.sampler = function (opts) {
     addressModeV: "repeat",
     mipmapFilter: opts.mipmap ? "linear" : "nearest"
   });
-  return sampler
-}
+  return sampler;
+};
 
-Context.prototype.bindGroupLayout = function (opts) {
+Context.prototype.bindGroupLayout = function(opts) {
   const layoutDescriptor = {
     bindings: opts.map((binding, i) => {
       return {
         binding: i,
         visibility: binding.visibility,
         type: binding.type
-      }
-    })    
-  }
+      };
+    })
+  };
   const bindGroupLayout = this.device.createBindGroupLayout(layoutDescriptor);
 
-  return bindGroupLayout
-}
+  return bindGroupLayout;
+};
 
-Context.prototype.bindGroup = function (opts) {
+Context.prototype.bindGroup = function(opts) {
   const bindGroupDescriptor = {
     layout: opts.layout,
     bindings: opts.bindings.map((resource, i) => {
       return {
         binding: i,
-        resource: (resource instanceof GPUTexture) ? resource.createView() : resource
-      }
-    }) 
+        resource:
+          resource instanceof GPUTexture ? resource.createView() : resource
+      };
+    })
   };
   const bindGroup = this.device.createBindGroup(bindGroupDescriptor);
-  return bindGroup
-}
+  return bindGroup;
+};
 
-Context.prototype.pipeline = function (opts) {
-  let vShaderModule = this.shader({ vertex: opts.vert })
-  let fShaderModule = this.shader({ fragment: opts.frag })    
-
+Context.prototype.pipeline = function(opts) {
+  let vShaderModule = this.shader({ vertex: opts.vert });
+  let fShaderModule = this.shader({ fragment: opts.frag });
 
   const pipeline = this.device.createRenderPipeline({
     layout: this.device.createPipelineLayout({
@@ -336,7 +338,24 @@ Context.prototype.pipeline = function (opts) {
     },
     primitiveTopology: "triangle-list"
   });
-  return pipeline
+  return pipeline;
+};
+
+function bufferSubData(device, destBuffer, destOffset, data) {
+  const srcArrayBuffer = data.buffer
+  const byteCount = srcArrayBuffer.byteLength;
+  const [srcBuffer, arrayBuffer] = device.createBufferMapped({
+    size: byteCount,
+    usage: GPUBufferUsage.MAP_SRC | GPUBufferUsage.COPY_SRC
+  });
+  new Uint8Array(arrayBuffer).set(new Uint8Array(srcArrayBuffer)); // memcpy
+  srcBuffer.unmap();
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(srcBuffer, 0, destBuffer, destOffset, byteCount);
+  const commandBuffer = encoder.finish();
+  const queue = device.defaultQueue
+  queue.submit([commandBuffer]);
+  srcBuffer.destroy();
 }
 
 function createTextureFromImage(device, img, usage) {
