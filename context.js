@@ -1,6 +1,6 @@
 // Written agains Chrome Canary Version 81.0.4014.0 
 
-function Context({ gpu, adapter, device, glslangimpl }) {
+function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   this.gpu = gpu;
   this.adapter = adapter;
   this.device = device;
@@ -8,8 +8,8 @@ function Context({ gpu, adapter, device, glslangimpl }) {
   this.disposed = false;
 
   this.canvas = document.createElement("canvas");
-  this.canvas.width = 600;
-  this.canvas.height = 600;
+  this.canvas.width = width;
+  this.canvas.height = height;
   document.body.appendChild(this.canvas);
 
   this.webgpuContext = this.canvas.getContext("gpupresent");
@@ -25,6 +25,22 @@ function Context({ gpu, adapter, device, glslangimpl }) {
   this.PixelFormat = {
     Depth24PlusStencil18: "depth24plus-stencil8"
   };
+
+  this.Filter = {
+    Linear: "linear"
+  }
+
+  this.BindingType = {
+    UniformBuffer: "uniform-buffer",
+    Sampler: "sampler",
+    SampledTexture: "sampled-texture",
+  }
+
+  this.ShaderStage = {
+    Vertex: 0x01,
+    Fragment: 0x02,
+    Compute: 0x04
+  }
 }
 
 Context.prototype.frame = function(cb) {
@@ -193,6 +209,110 @@ Context.prototype.pass = function (opts) {
   return renderPassDescriptor
 }
 
+Context.prototype.sampler = function (opts) {
+  const sampler = this.device.createSampler({
+    magFilter: opts.min,
+    minFilter: opts.mag,
+    mipmapFilter: opts.mipmap ? "linear" : "nearest"
+  });
+  return sampler
+}
+
+Context.prototype.bindGroupLayout = function (opts) {
+  const layoutDescriptor = {
+    bindings: opts.map((binding, i) => {
+      return {
+        binding: i,
+        visibility: binding.visibility,
+        type: binding.type
+      }
+    })    
+  }
+  const bindGroupLayout = this.device.createBindGroupLayout(layoutDescriptor);
+
+  return bindGroupLayout
+}
+
+Context.prototype.bindGroup = function (opts) {
+  const bindGroupDescriptor = {
+    layout: opts.layout,
+    bindings: opts.bindings.map((resource, i) => {
+      return {
+        binding: i,
+        resource: (resource instanceof GPUTexture) ? resource.createView() : resource
+      }
+    }) 
+  };
+  const bindGroup = this.device.createBindGroup(bindGroupDescriptor);
+  return bindGroup
+}
+
+Context.prototype.pipeline = function (opts) {
+  let vShaderModule = this.shader({ vertex: opts.vert })
+  let fShaderModule = this.shader({ fragment: opts.frag })    
+
+
+  const pipeline = this.device.createRenderPipeline({
+    layout: this.device.createPipelineLayout({
+      bindGroupLayouts: opts.bindGroupLayouts
+    }),
+    vertexStage: {
+      module: vShaderModule,
+      entryPoint: "main"
+    },
+    fragmentStage: {
+      module: fShaderModule,
+      entryPoint: "main"
+    },
+    vertexState: {
+      indexFormat: "uint32",
+      vertexBuffers: [
+        {
+          arrayStride: 3 * 4,
+          attributes: [
+            {
+              // position
+              shaderLocation: 0,
+              offset: 0,
+              format: "float3"
+            }
+          ]
+        },
+        {
+          arrayStride: 2 * 4,
+          attributes: [
+            {
+              // uvs
+              shaderLocation: 1,
+              offset: 0,
+              format: "float2"
+            }
+          ]
+        }
+      ]
+    },
+    colorStates: [
+      {
+        format: "bgra8unorm",
+        alphaBlend: {
+          srcFactor: "src-alpha",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add"
+        }
+      }
+    ],
+    depthStencilState: {
+      depthWriteEnabled: true,
+      depthCompare: "less",
+      format: "depth24plus-stencil8",
+      stencilFront: {},
+      stencilBack: {}
+    },
+    primitiveTopology: "triangle-list"
+  });
+  return pipeline
+}
+
 function createTextureFromImage(device, img, usage) {
   // const img = document.createElement('img');
   // img.src = src;
@@ -310,13 +430,13 @@ function createTextureFromImage(device, img, usage) {
   return texture;
 }
 
-async function createContext() {
+async function createContext(opts) {
   const gpu = navigator.gpu;
   const adapter = await gpu.requestAdapter();
   const device = await adapter.requestDevice();
   const glslangimpl = await glslang(); //required via script tag
 
-  return new Context({ gpu, adapter, device, glslangimpl });
+  return new Context({ ...opts, gpu, adapter, device, glslangimpl });
 }
 
 module.exports = createContext;
