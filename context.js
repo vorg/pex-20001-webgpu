@@ -33,7 +33,9 @@ function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   this.BindingType = {
     UniformBuffer: "uniform-buffer",
     Sampler: "sampler",
-    SampledTexture: "sampled-texture"
+    SampledTexture: "sampled-texture",
+    ReadOnlyStorageBuffer: "readonly-storage-buffer",
+    StorageBuffer: "storage-buffer"
   };
 
   this.ShaderStage = {
@@ -198,6 +200,10 @@ Context.prototype.shader = function(opts) {
     type = "fragment";
     src = opts.fragment;
   }
+  if (opts.compute) {
+    type = "compute";
+    src = opts.compute;
+  }
 
   // TODO: this seem to be old format as new require 'module' prop
   let shaderModuleDescriptor = {
@@ -276,6 +282,22 @@ Context.prototype.bindGroup = function(opts) {
   return bindGroup;
 };
 
+Context.prototype.computePipeline = function(opts) {
+  let cShaderModule = this.shader({ compute: opts.compute });
+
+  const computePipeline = this.device.createComputePipeline({
+    layout: this.device.createPipelineLayout({
+      bindGroupLayouts: opts.bindGroupLayouts
+    }),
+    computeStage: {
+      module: cShaderModule,
+      entryPoint: "main"
+    }
+  })
+
+  return computePipeline
+}
+
 Context.prototype.pipeline = function(opts) {
   let vShaderModule = this.shader({ vertex: opts.vert });
   let fShaderModule = this.shader({ fragment: opts.frag });
@@ -291,7 +313,7 @@ Context.prototype.pipeline = function(opts) {
     fragmentStage: {
       module: fShaderModule,
       entryPoint: "main"
-    },
+    },   
     vertexState: {
       indexFormat: "uint32",
       vertexBuffers: [
