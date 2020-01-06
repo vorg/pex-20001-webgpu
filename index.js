@@ -320,7 +320,7 @@ async function init() {
   const gpuCommands = commandEncoder.finish();
   device.defaultQueue.submit([gpuCommands]);
   const arrayBuffer = await gpuReadBuffer.mapReadAsync();
-  console.log(new Float32Array(arrayBuffer));
+  console.log('compute result', new Float32Array(arrayBuffer));
 
   // yay it works
   // next step: check out boids: https://github.com/austinEng/webgpu-samples/blob/master/src/examples/computeBoids.ts

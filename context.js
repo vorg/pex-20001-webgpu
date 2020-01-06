@@ -140,7 +140,7 @@ Context.prototype.vertexBuffer = function(opts) {
 
   let bufferDescriptor = {
     size: data.byteLength,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | opts.usage
   };
   let vertexBuffer = this.device.createBuffer(bufferDescriptor);
   vertexBuffer.setSubData(0, data);
