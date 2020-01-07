@@ -3,16 +3,20 @@ const createTorus = require("primitive-torus");
 const { mat4 } = require("pex-math");
 const createContext = require("./context");
 const loadImage = require("./load-image");
+const random = require('pex-random')
 const {
   perspective: createCamera,
   orbiter: createOrbiter
 } = require("pex-cam");
+
+const numParticles = 12 * 1024;
 
 const computeShaderGLSL = `
 #version 450
   struct Particle {
     vec2 pos;
     vec2 vel;
+    vec4 color;
   };
 
   layout(std140, set = 0, binding = 0) uniform SimParams {
@@ -26,18 +30,21 @@ const computeShaderGLSL = `
   } params;
 
   layout(std140, set = 0, binding = 1) buffer ParticlesA {
-    Particle particles[1500];
+    Particle particles[${numParticles}];
   } particlesA;
 
   layout(std140, set = 0, binding = 2) buffer ParticlesB {
-    Particle particles[1500];
+    Particle particles[${numParticles}];
   } particlesB;
+
+  // magic
+  layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
   void main() {
     // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
 
     uint index = gl_GlobalInvocationID.x;
-    if (index >= 1500) { return; }
+    if (index >= ${numParticles}) { return; }
 
     vec2 vPos = particlesA.particles[index].pos;
     vec2 vVel = particlesA.particles[index].vel;
@@ -50,10 +57,14 @@ const computeShaderGLSL = `
 
     vec2 pos;
     vec2 vel;
-    for (int i = 0; i < 1500; ++i) {
-      if (i == index) { continue; }
+    for (int i = 0; i < ${numParticles}; ++i) {
+      if (i == index) { continue; }      
       pos = particlesA.particles[i].pos.xy;
       vel = particlesA.particles[i].vel.xy;
+
+      vec2 tmp = pos - vPos;
+      float distSq = dot(tmp, tmp);
+      if (distSq > 0.1 * 0.1) continue;
 
       if (distance(pos, vPos) < params.rule1Distance) {
         cMass += pos;
@@ -93,33 +104,38 @@ const computeShaderGLSL = `
     // Write back
     particlesB.particles[index].vel = vVel;
   }
-  `
-
+  `;
 
 const vertexShaderGLSL = `
 #version 450
   layout(location = 0) in vec2 a_particlePos;
-  layout(location = 1) in vec2 a_particleVel;
+  layout(location = 1) in vec2 a_particleVel;  
   layout(location = 2) in vec2 a_pos;
+  layout(location = 3) in vec4 a_particleColor;
+  layout(location = 0) out vec4 vColor;
   void main() {
     float angle = -atan(a_particleVel.x, a_particleVel.y);
     vec2 pos = vec2(a_pos.x * cos(angle) - a_pos.y * sin(angle),
             a_pos.x * sin(angle) + a_pos.y * cos(angle));
     gl_Position = vec4(pos + a_particlePos, 0, 1);
-  }`
+    vColor = a_particleColor;
+  }`;
 
 const fragmentShaderGLSL = `
 #version 450
+  layout(location = 0) in vec4 vColor;
   layout(location = 0) out vec4 fragColor;
   void main() {
     fragColor = vec4(1.0);
-  }`
+    fragColor = vColor;
+  }`;
 
-const numParticles = 1500;
 
 
 async function init() {
   const ctx = await createContext({ width: 600, height: 600 });
+  document.body.style.margin = 0
+
   console.log("webgpu ctx", ctx);
 
   const camera = createCamera({
@@ -144,8 +160,14 @@ async function init() {
   //   ],
   // });
   const computeBindGroupLayout = ctx.bindGroupLayout([
-    { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.UniformBuffer },
-    { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.StorageBuffer },
+    {
+      visibility: ctx.ShaderStage.Compute,
+      type: ctx.BindingType.UniformBuffer
+    },
+    {
+      visibility: ctx.ShaderStage.Compute,
+      type: ctx.BindingType.StorageBuffer
+    },
     { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.StorageBuffer }
   ]);
 
@@ -217,8 +239,51 @@ async function init() {
 
   const pipeline = ctx.pipeline({
     vert: vertexShaderGLSL,
-    frag: fragmentShaderGLSL,
-    bindGroupLayouts: []
+    frag: fragmentShaderGLSL,    
+    bindGroupLayouts: [],
+    //TODO: vertex format simplification
+    vertexState: {
+      vertexBuffers: [
+        {
+          // instanced particles buffer
+          arrayStride: 8 * 4,
+          stepMode: "instance",
+          attributes: [
+            {
+              // instance position
+              shaderLocation: 0,
+              offset: 0,
+              format: "float2"
+            },
+            {
+              // instance velocity
+              shaderLocation: 1,
+              offset: 2 * 4,
+              format: "float2"
+            },
+            {
+              // instance color
+              shaderLocation: 3,
+              offset: 4 * 4,
+              format: "float2"
+            }
+          ]
+        },
+        {
+          // vertex buffer
+          arrayStride: 2 * 4,
+          stepMode: "vertex",
+          attributes: [
+            {
+              // vertex positions
+              shaderLocation: 2,
+              offset: 0,
+              format: "float2"
+            }
+          ]
+        }
+      ]
+    }
   });
 
   // const computePipeline = device.createComputePipeline({
@@ -266,12 +331,11 @@ async function init() {
   // };
 
   const pass = ctx.pass({
-    clearColor: [1, 0, 0, 1],
+    clearColor: [0, 0, 0, 1],
     depth: depthTexture,
     clearDepth: 1
   });
 
-  
   // const vertexBufferData = new Float32Array([-0.01, -0.02, 0.01, -0.02, 0.00, 0.02]);
   // const verticesBuffer = device.createBuffer({
   //   size: vertexBufferData.byteLength,
@@ -279,16 +343,19 @@ async function init() {
   // });
   // verticesBuffer.setSubData(0, vertexBufferData);
 
-  let vertexBuffer = ctx.vertexBuffer({ data: [-0.01, -0.02, 0.01, -0.02, 0.00, 0.02] });
+  let verticesBuffer = ctx.vertexBuffer({
+    data: [-0.01, -0.02, 0.01, -0.02, 0.0, 0.02].map((f) => f * 0.5)
+  });
 
+  const s = 0.75
   const simParamData = new Float32Array([
-    0.04,  // deltaT;
-    0.1,   // rule1Distance;
-    0.025, // rule2Distance;
-    0.025, // rule3Distance;
-    0.02,  // rule1Scale;
-    0.05,  // rule2Scale;
-    0.005  // rule3Scale;
+    0.04, // deltaT;
+    s * 0.1, // rule1Distance;
+    s * 0.025, // rule2Distance;
+    s * 0.025, // rule3Distance;
+    0.02, // rule1Scale;
+    0.05, // rule2Scale;
+    0.005 // rule3Scale;
   ]);
   // const simParamBuffer = device.createBuffer({
   //   size: simParamData.byteLength,
@@ -299,14 +366,22 @@ async function init() {
   const simParamBuffer = ctx.uniformBuffer({
     size: simParamData.byteLength
   });
-  ctx.update(simParamBuffer, { offset: 0, data: simParamData })
+  ctx.update(simParamBuffer, { offset: 0, data: simParamData });
 
-  const initialParticleData = new Float32Array(numParticles * 4);
+  const initialParticleData = new Float32Array(numParticles * 8);
   for (let i = 0; i < numParticles; ++i) {
-    initialParticleData[4 * i + 0] = 2 * (Math.random() - 0.5);
-    initialParticleData[4 * i + 1] = 2 * (Math.random() - 0.5);
-    initialParticleData[4 * i + 2] = 2 * (Math.random() - 0.5) * 0.1;
-    initialParticleData[4 * i + 3] = 2 * (Math.random() - 0.5) * 0.1;
+    var u = Math.random()
+    var v = Math.random()
+    initialParticleData[8 * i + 0] = 2 * (u - 0.5);
+    initialParticleData[8 * i + 1] = 2 * (v - 0.5);
+    // initialParticleData[8 * i + 2] = 2 * (Math.random() - 0.5) * 0.1;
+    // initialParticleData[8 * i + 3] = 2 * (Math.random() - 0.5) * 0.1;
+    initialParticleData[8 * i + 2] = random.float(0.1, 0.3);
+    initialParticleData[8 * i + 3] = random.float(0.1, 0.3);
+    initialParticleData[8 * i + 4] = u
+    initialParticleData[8 * i + 5] = v
+    initialParticleData[8 * i + 6] = 0
+    initialParticleData[8 * i + 7] = 1
   }
 
   const particleBuffers = new Array(2);
@@ -315,36 +390,60 @@ async function init() {
     // particleBuffers[i] = device.createBuffer({
     //   size: initialParticleData.byteLength,
     //   usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE
-    // });    
+    // });
     //particleBuffers[i].setSubData(0, initialParticleData);
-    particleBuffers[i] = ctx.vertexBuffer({ data: initialParticleData });
+    particleBuffers[i] = ctx.vertexBuffer({
+      data: initialParticleData,
+      usage:
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE
+    });
   }
 
   for (let i = 0; i < 2; ++i) {
-    particleBindGroups[i] = device.createBindGroup({
+    // particleBindGroups[i] = device.createBindGroup({
+    //   layout: computeBindGroupLayout,
+    //   bindings: [{
+    //     binding: 0,
+    //     resource: {
+    //       buffer: simParamBuffer,
+    //       offset: 0,
+    //       size: simParamData.byteLength
+    //     },
+    //   }, {
+    //     binding: 1,
+    //     resource: {
+    //       buffer: particleBuffers[i],
+    //       offset: 0,
+    //       size: initialParticleData.byteLength,
+    //     },
+    //   }, {
+    //     binding: 2,
+    //     resource: {
+    //       buffer: particleBuffers[(i + 1) % 2],
+    //       offset: 0,
+    //       size: initialParticleData.byteLength,
+    //     },
+    //   }],
+    // });
+    particleBindGroups[i] = ctx.bindGroup({
       layout: computeBindGroupLayout,
-      bindings: [{
-        binding: 0,
-        resource: {
+      bindings: [
+        {
           buffer: simParamBuffer,
           offset: 0,
           size: simParamData.byteLength
         },
-      }, {
-        binding: 1,
-        resource: {
+        {
           buffer: particleBuffers[i],
           offset: 0,
-          size: initialParticleData.byteLength,
+          size: initialParticleData.byteLength
         },
-      }, {
-        binding: 2,
-        resource: {
+        {
           buffer: particleBuffers[(i + 1) % 2],
           offset: 0,
-          size: initialParticleData.byteLength,
-        },
-      }],
+          size: initialParticleData.byteLength
+        }
+      ]
     });
   }
 
@@ -360,6 +459,7 @@ async function init() {
   //     passEncoder.dispatch(numParticles);
   //     passEncoder.endPass();
   //   }
+
   //   {
   //     const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
   //     passEncoder.setPipeline(renderPipeline);
@@ -373,22 +473,33 @@ async function init() {
   //   ++t;
   // }
 
-  const renderPassCmd = {
+  const drawCmd = {
     pass: pass,
-    pipeline: pipeline
+    pipeline: pipeline,
+    attributes: [null, verticesBuffer],
+    uniforms: [],
+    count: 3,
+    instances: numParticles
   };
-
 
   let t = 0;
   function render() {
-    ctx.submit(renderPassCmd, () => {
-    })
+    const commandEncoder = ctx.defaultCommandEncoder
+    {
+      const passEncoder = commandEncoder.beginComputePass();
+      passEncoder.setPipeline(computePipeline);
+      passEncoder.setBindGroup(0, particleBindGroups[t % 2]);
+      passEncoder.dispatch(numParticles);
+      passEncoder.endPass();
+    }
+
+    drawCmd.attributes[0] = particleBuffers[(t + 1) % 2];
+    ctx.submit(drawCmd);
 
     ++t;
   }
 
   /*old*/
-
 
   ctx.frame(render);
 }

@@ -91,8 +91,10 @@ Context.prototype.submit = function(opts, subpass) {
     passEncoder.setPipeline(opts.pipeline);
   }
 
-  if (opts.count) {
+  if (opts.indices) {
     passEncoder.drawIndexed(opts.count, opts.instances || 1, 0, 0, 0);
+  } else {
+    passEncoder.draw(opts.count, opts.instances || 1, 0, 0);
   }
 
   if (subpass) {
@@ -140,7 +142,7 @@ Context.prototype.vertexBuffer = function(opts) {
 
   let bufferDescriptor = {
     size: data.byteLength,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | opts.usage
+    usage: opts.usage | (GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST)
   };
   let vertexBuffer = this.device.createBuffer(bufferDescriptor);
   vertexBuffer.setSubData(0, data);
@@ -314,7 +316,7 @@ Context.prototype.pipeline = function(opts) {
       module: fShaderModule,
       entryPoint: "main"
     },   
-    vertexState: {
+    vertexState: opts.vertexState || {
       indexFormat: "uint32",
       vertexBuffers: [
         {

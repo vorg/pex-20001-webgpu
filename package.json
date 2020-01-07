@@ -14,6 +14,7 @@
     "pex-cam": "^2.7.1",
     "pex-context": "^2.10.2",
     "pex-math": "^3.0.0-4",
+    "pex-random": "^1.0.1",
     "primitive-cube": "^2.0.1",
     "primitive-sphere": "^3.0.0",
     "primitive-torus": "^1.0.4",
