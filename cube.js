@@ -331,7 +331,7 @@ async function init() {
   function render(time) {
     ctx.submit(renderPassCmd, () => {
       ctx.submit(drawCubeCmd);
-      ctx.submit(drawTorusCmd);
+      //ctx.submit(drawTorusCmd);
     });
 
     ctx.update(uniformBuffer, {
