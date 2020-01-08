@@ -93,7 +93,7 @@ Context.prototype.submit = function(opts, subpass) {
 
   if (opts.indices) {
     passEncoder.drawIndexed(opts.count, opts.instances || 1, 0, 0, 0);
-  } else {
+  } else if (opts.count) {
     passEncoder.draw(opts.count, opts.instances || 1, 0, 0);
   }
 
@@ -142,7 +142,7 @@ Context.prototype.vertexBuffer = function(opts) {
 
   let bufferDescriptor = {
     size: data.byteLength,
-    usage: opts.usage | (GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST)
+    usage: opts.usage || (GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST)    
   };
   let vertexBuffer = this.device.createBuffer(bufferDescriptor);
   vertexBuffer.setSubData(0, data);
