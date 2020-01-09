@@ -34,10 +34,12 @@ function minMax () {
 const gridSize = 1
 const gridResolution = 32
 const step = gridSize / gridResolution
-const voxelData = voxelize(mesh.cells, mesh.positions, step)
 const numVoxels = gridResolution * gridResolution * gridResolution
 const voxels = new Float32Array(numVoxels)
 const N = gridResolution;
+
+console.time('voxelize on cpu')
+const voxelData = voxelize(mesh.cells, mesh.positions, step)
 for (var i = 0; i < voxelData.voxels.shape[0]; i++) {
   for (var j = 0; j < voxelData.voxels.shape[1]; j++) {
     for (var k = 0; k < voxelData.voxels.shape[2]; k++) {
@@ -56,6 +58,7 @@ for (var i = 0; i < voxelData.voxels.shape[0]; i++) {
     }
   }
 }
+console.timeEnd('voxelize on cpu')
 
 //[ resolution * i + origin[0], resolution * j + origin[1], resolution * k + origin[2] ]
 
