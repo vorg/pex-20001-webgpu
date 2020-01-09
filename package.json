@@ -11,6 +11,8 @@
   "dependencies": {
     "@webgpu/glslang": "0.0.12",
     "budo": "^11.6.3",
+    "bunny": "^1.0.1",
+    "geom-center-and-normalize": "^1.0.3",
     "pex-cam": "^2.7.1",
     "pex-context": "^2.10.2",
     "pex-math": "^3.0.0-4",
@@ -18,7 +20,8 @@
     "primitive-cube": "^2.0.1",
     "primitive-sphere": "^3.0.0",
     "primitive-torus": "^1.0.4",
-    "ramda": "^0.26.1"
+    "ramda": "^0.26.1",
+    "voxelize": "^1.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.7.7",

@@ -423,7 +423,6 @@ function createTextureFromImage(device, img, usage) {
     const rowPitch = Math.ceil((width * 4) / 256) * 256;
     if (rowPitch == width * 4) {
       data = imageData.data;
-      console.log("여기냐", width, data);
     } else {
       // data = new Uint8Array(rowPitch * img.height);
       // for (let y = 0; y < img.height; ++y) {
