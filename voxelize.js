@@ -32,10 +32,11 @@ function minMax () {
 }
 
 const gridSize = 1
-const gridResolution = 32
+const gridResolution = 64
 const step = gridSize / gridResolution
 const numVoxels = gridResolution * gridResolution * gridResolution
 let voxels = new Float32Array(numVoxels)
+let voxelColors = new Array(numVoxels * 4).fill(0).map(() => Math.random())
 const N = gridResolution;
 
 console.time('voxelize on cpu')
@@ -88,10 +89,13 @@ const vertexShaderGLSL = `
       mat4 modelMatrix;
       vec2 uvScale;      
     } optsUniforms;
+
     layout(location = 0) in vec3 position;
     layout(location = 1) in vec2 uv;
     layout(location = 2) in float voxel;
+    layout(location = 3) in vec4 voxelColor;
     layout(location = 0) out vec2 vUv;
+    layout(location = 1) out vec4 vColor;
 	  void main() {
     vUv = uv * optsUniforms.uvScale;
     vec3 pos = position;
@@ -101,6 +105,7 @@ const vertexShaderGLSL = `
     float x = mod(gl_InstanceIndex, N);        
     float y = floor(gl_InstanceIndex / (N * N));
     float z = mod(floor(gl_InstanceIndex / (N)), N);
+    vColor = voxelColor;
     float offset = size * (N / 2.0 - 0.5) / N;    
     pos.x += x * step - offset;
     pos.y += y * step - offset;
@@ -113,9 +118,11 @@ const vertexShaderGLSL = `
 const fragmentShaderGLSL = `
   #version 450
   layout(location = 0) in vec2 vUv;
+  layout(location = 1) in vec4 vColor;
   layout(location = 0) out vec4 outColor;
   void main() {
     outColor = vec4(vUv, 0.0, 1.0);    
+    outColor = vColor;
 	}
 `;
 
@@ -192,6 +199,7 @@ async function init() {
   let uvsBuffer = ctx.vertexBuffer({ data: cube.uvs });
   let indexBuffer = ctx.indexBuffer({ data: cube.cells });
   let voxelsBuffer = ctx.vertexBuffer({ data: voxels })//, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE });
+  let voxelsColorBuffer = ctx.vertexBuffer({ data: voxelColors })//, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE });
 
   let vertexBufferMesh = ctx.vertexBuffer({ data: mesh.positions });
   let uvsBufferMesh = ctx.vertexBuffer({ data: mesh.uvs });
@@ -234,12 +242,14 @@ async function init() {
     bindings: [{ buffer: optsUniformBufferMesh }]
   });
 
+  
   const pipeline = ctx.pipeline({
     vert: vertexShaderMeshGLSL,
     frag: fragmentShaderGLSL,
     bindGroupLayouts: [uniformsBindGroupLayout, optsUniformsBindGroupLayout]
   });
-
+  
+  console.log('pipeline')
   const instancedCubePipeline = ctx.pipeline({
     vert: vertexShaderGLSL,
     frag: fragmentShaderGLSL,
@@ -279,10 +289,23 @@ async function init() {
               format: "float"
             }           
           ]
+        },
+        {
+          // instanced particles colorbuffer
+          arrayStride: 4 * 4,
+          stepMode: "instance",
+          attributes: [
+            {
+              shaderLocation: 3,
+              offset: 0,
+              format: "float"
+            }           
+          ]
         }
       ]
     }
   });
+  console.log('pipeline2')
 
   let projectionMatrix = new Float32Array(16);
   let modelMatrix = new Float32Array(16);
@@ -313,7 +336,8 @@ async function init() {
       // TODO: this should be called vertexBuffers
       vertexBuffer,
       uvsBuffer,
-      voxelsBuffer
+      voxelsBuffer,
+      voxelsColorBuffer
     ],
     indices: indexBuffer, // TODO: this should be called indexBuffer
     uniforms: [
@@ -435,12 +459,25 @@ async function init() {
   new Float32Array(voxelsComputeBufferDataArray).set(voxels);
   voxelsComputeBuffer.unmap();
 
+  // Create storage buffer to keep our computed voxels data
+  // This can be vetex buffer just we we do with boids but currently i'm not sure if it's going to be readable
+  const [
+    voxelsColorComputeBuffer,
+    voxelsColorComputeBufferDataArray,
+  ] = ctx.device.createBufferMapped({
+    size: voxels.byteLength * 4,
+    usage: GPUBufferUsage.STORAGE  | GPUBufferUsage.COPY_SRC
+  });
+  new Float32Array(voxelsColorComputeBufferDataArray).set(new Float32Array(voxelColors));
+  voxelsColorComputeBuffer.unmap();
 
   // create layout of our data
   const voxelizeSurfaceFrontBindLayout = ctx.bindGroupLayout([
     // voxelizeSurfaceFrontData goes here
     { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.UniformBuffer },
     // voxelsComputeBuffer goes here
+    { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.StorageBuffer },    
+    // voxelsColorComputeBuffer goes here
     { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.StorageBuffer }    
   ]);
 
@@ -449,7 +486,8 @@ async function init() {
     layout: voxelizeSurfaceFrontBindLayout,
     bindings: [
       { buffer: voxelizeSurfaceFrontUniformBuffer },
-      { buffer: voxelsComputeBuffer }
+      { buffer: voxelsComputeBuffer },
+      { buffer: voxelsColorComputeBuffer }
     ]
   });
 
@@ -463,21 +501,42 @@ async function init() {
     float voxels[${numVoxels}];
   } voxelData;
 
+  layout(std430, set = 0, binding = 2) buffer VoxelColorData {
+    vec4 colors[${numVoxels}];
+  } voxelColorData;
+
   void main() {
     ivec3 resultCell = ivec3(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y, gl_GlobalInvocationID.z);
-    float result = 1.0;
+    float result = 0.0;
     int N = int(params.gridResolution);
     int index = resultCell.x + resultCell.z * N + resultCell.y * N * N;
     float fy = gl_GlobalInvocationID.y / float(N);
-    if (cos(gl_GlobalInvocationID.z * 3.14 / 30.0) * sin(gl_GlobalInvocationID.x * 3.14 / 30.0) * 0.5 + 0.5 < fy) result = 0.0;
-    voxelData.voxels[index] = result;
+    result = cos(gl_GlobalInvocationID.z * 3.14 / 30.0) * 0.5 + 0.5;
+
+    int numSteps = N;
+
+    int count = 0;
+    for (int z = resultCell.z; z < N; z++) {
+      int index = resultCell.x + z * N + resultCell.y * N * N;
+      if (voxelData.voxels[index] > 0.0) {
+        count++;
+      } else {        
+        break;
+      }
+    }
+    
+    voxelColorData.colors[index] = vec4(max(0.0, 1.0 - count / 10.0));
   }
 `;
+
+console.log('compute pipeline coming')
 
   const voxelizeSurfaceFrontComputePipeline = ctx.computePipeline({
     compute: voxelizeSurfaceFrontComputeGLSL,
     bindGroupLayouts: [voxelizeSurfaceFrontBindLayout]
   });
+
+  console.log('compute pipeline coming with error?')
 
   const device = ctx.device
   const commandEncoder = device.createCommandEncoder();
@@ -487,6 +546,8 @@ async function init() {
   voxelizePass.setBindGroup(0, voxelizeSurfaceFrontBindGroup);
   voxelizePass.dispatch(N, N, N);
   voxelizePass.endPass();
+
+  console.log('ended voxelization')
 
   /*---------------------------------------------*/
   
@@ -502,30 +563,35 @@ async function init() {
   passEncoder.endPass();
 
   const gpuVoxelReadBuffer = device.createBuffer({
-    size: voxels.byteLength,
+    size: voxels.byteLength * 4,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
   });
 
   // Encode commands for copying buffer to buffer.
   commandEncoder.copyBufferToBuffer(
-    voxelsComputeBuffer /* source buffer */,
+    voxelsColorComputeBuffer /* source buffer */,
     0 /* source offset */,
     gpuVoxelReadBuffer /* destination buffer */,
     0 /* destination offset */,
-    voxels.byteLength /* size */
+    voxels.byteLength * 4 /* size */
   );
+
+
+  console.log('finished reading colors voxelization')
 
   // Submit GPU commands.
   const gpuComputeCommands = commandEncoder.finish();
   device.defaultQueue.submit([gpuComputeCommands]);
   const voxelArrayBuffer = await gpuVoxelReadBuffer.mapReadAsync();
-  console.log('voxels result', new Float32Array(voxelArrayBuffer));
-  voxels = new Float32Array(voxelArrayBuffer)
-  ctx.update(voxelsBuffer, { offset: 0, data: voxels })
+  voxelsColors = new Float32Array(voxelArrayBuffer)
+  console.log('voxels result', voxelsColors);
+  // voxelsColors = new Float32Array(voxelArrayBuffer)
+  ctx.update(voxelsColorBuffer, { offset: 0, data: voxelsColors })
 
-
+  console.log('ended update')
   // old compute
 
+  /*
   // Get a GPU buffer for reading in an unmapped state.
   const gpuReadBuffer = device.createBuffer({
     size: resultMatrixBufferSize,
@@ -534,11 +600,11 @@ async function init() {
 
   // Encode commands for copying buffer to buffer.
   commandEncoder.copyBufferToBuffer(
-    resultMatrixBuffer /* source buffer */,
-    0 /* source offset */,
-    gpuReadBuffer /* destination buffer */,
-    0 /* destination offset */,
-    resultMatrixBufferSize /* size */
+    resultMatrixBuffer, // source buffer
+    0, // source offset
+    gpuReadBuffer /* destination buffer,
+    0, //destination offset
+    resultMatrixBufferSize
   );
 
   // Submit GPU commands.
@@ -546,13 +612,16 @@ async function init() {
   device.defaultQueue.submit([gpuCommands]);
   const arrayBuffer = await gpuReadBuffer.mapReadAsync();
   console.log('compute result', new Float32Array(arrayBuffer));
-
+  */
   // yay it works
   // next step: check out boids: https://github.com/austinEng/webgpu-samples/blob/master/src/examples/computeBoids.ts
   // next step: learn about workgroups
 
+  console.log('ended text compute')
+
   /*---------------------------------------------*/
 
+  console.log('init done')
   function render(time) {
     ctx.submit(renderPassCmd, () => {
       ctx.submit(drawVoxelsCmd);
