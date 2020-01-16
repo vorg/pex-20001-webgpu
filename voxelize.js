@@ -35,7 +35,7 @@ const gridSize = 1
 const gridResolution = 32
 const step = gridSize / gridResolution
 const numVoxels = gridResolution * gridResolution * gridResolution
-const voxels = new Float32Array(numVoxels)
+let voxels = new Float32Array(numVoxels)
 const N = gridResolution;
 
 console.time('voxelize on cpu')
@@ -69,7 +69,10 @@ console.timeEnd('voxelize on cpu')
 //   x /= 15
 //   y /= 15
 //   z /= 15
-//   voxels[i] = (random.noise3(x, y, z) > 0) ? 1 : 0
+//   var value = 0
+//   if (x == 0) value = 1
+//   voxels[i] = value
+//   //voxels[i] = (random.noise3(x, y, z) > 0) ? 1 : 0
 // }
 
 console.log('voxels', voxels)
@@ -188,7 +191,7 @@ async function init() {
   let vertexBuffer = ctx.vertexBuffer({ data: cube.positions });
   let uvsBuffer = ctx.vertexBuffer({ data: cube.uvs });
   let indexBuffer = ctx.indexBuffer({ data: cube.cells });
-  let voxelsBuffer = ctx.vertexBuffer({ data: voxels });
+  let voxelsBuffer = ctx.vertexBuffer({ data: voxels })//, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE });
 
   let vertexBufferMesh = ctx.vertexBuffer({ data: mesh.positions });
   let uvsBufferMesh = ctx.vertexBuffer({ data: mesh.uvs });
@@ -408,9 +411,85 @@ async function init() {
     ],
   };
 
-  /*---------------------------------------------*/
+  // voxelization
+
+  // Create UBO with uniform params of the voxelization algorithm
+  const voxelizeSurfaceFrontData = new Float32Array([
+    gridSize,
+    gridResolution
+  ])
+  const voxelizeSurfaceFrontUniformBuffer = ctx.uniformBuffer({
+    size: voxelizeSurfaceFrontData.byteLength
+  });
+  ctx.update(voxelizeSurfaceFrontUniformBuffer, { offset: 0, data: voxelizeSurfaceFrontData});
+
+  // Create storage buffer to keep our computed voxels data
+  // This can be vetex buffer just we we do with boids but currently i'm not sure if it's going to be readable
+  const [
+    voxelsComputeBuffer,
+    voxelsComputeBufferDataArray,
+  ] = ctx.device.createBufferMapped({
+    size: voxels.byteLength,
+    usage: GPUBufferUsage.STORAGE  | GPUBufferUsage.COPY_SRC
+  });
+  new Float32Array(voxelsComputeBufferDataArray).set(voxels);
+  voxelsComputeBuffer.unmap();
+
+
+  // create layout of our data
+  const voxelizeSurfaceFrontBindLayout = ctx.bindGroupLayout([
+    // voxelizeSurfaceFrontData goes here
+    { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.UniformBuffer },
+    // voxelsComputeBuffer goes here
+    { visibility: ctx.ShaderStage.Compute, type: ctx.BindingType.StorageBuffer }    
+  ]);
+
+  // bind values to our data
+  const voxelizeSurfaceFrontBindGroup = ctx.bindGroup({
+    layout: voxelizeSurfaceFrontBindLayout,
+    bindings: [
+      { buffer: voxelizeSurfaceFrontUniformBuffer },
+      { buffer: voxelsComputeBuffer }
+    ]
+  });
+
+  const voxelizeSurfaceFrontComputeGLSL = `#version 450
+  layout(std140, set = 0, binding = 0) uniform Params {
+      float gridSize;
+      float gridResolution;
+  } params;
+
+  layout(std430, set = 0, binding = 1) buffer VoxelData {
+    float voxels[${numVoxels}];
+  } voxelData;
+
+  void main() {
+    ivec3 resultCell = ivec3(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y, gl_GlobalInvocationID.z);
+    float result = 1.0;
+    int N = int(params.gridResolution);
+    int index = resultCell.x + resultCell.z * N + resultCell.y * N * N;
+    float fy = gl_GlobalInvocationID.y / float(N);
+    if (cos(gl_GlobalInvocationID.z * 3.14 / 30.0) * sin(gl_GlobalInvocationID.x * 3.14 / 30.0) * 0.5 + 0.5 < fy) result = 0.0;
+    voxelData.voxels[index] = result;
+  }
+`;
+
+  const voxelizeSurfaceFrontComputePipeline = ctx.computePipeline({
+    compute: voxelizeSurfaceFrontComputeGLSL,
+    bindGroupLayouts: [voxelizeSurfaceFrontBindLayout]
+  });
+
   const device = ctx.device
   const commandEncoder = device.createCommandEncoder();
+
+  const voxelizePass = commandEncoder.beginComputePass();
+  voxelizePass.setPipeline(voxelizeSurfaceFrontComputePipeline);
+  voxelizePass.setBindGroup(0, voxelizeSurfaceFrontBindGroup);
+  voxelizePass.dispatch(N, N, N);
+  voxelizePass.endPass();
+
+  /*---------------------------------------------*/
+  
 
   //TODO: beginRenderPass takes description, computePass takes nothing
   //so if i create compute pass object it would be just empty type
@@ -421,6 +500,31 @@ async function init() {
   // dispatch instead of draw
   passEncoder.dispatch(firstMatrix[0] /* x */, secondMatrix[1] /* y */);
   passEncoder.endPass();
+
+  const gpuVoxelReadBuffer = device.createBuffer({
+    size: voxels.byteLength,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+  });
+
+  // Encode commands for copying buffer to buffer.
+  commandEncoder.copyBufferToBuffer(
+    voxelsComputeBuffer /* source buffer */,
+    0 /* source offset */,
+    gpuVoxelReadBuffer /* destination buffer */,
+    0 /* destination offset */,
+    voxels.byteLength /* size */
+  );
+
+  // Submit GPU commands.
+  const gpuComputeCommands = commandEncoder.finish();
+  device.defaultQueue.submit([gpuComputeCommands]);
+  const voxelArrayBuffer = await gpuVoxelReadBuffer.mapReadAsync();
+  console.log('voxels result', new Float32Array(voxelArrayBuffer));
+  voxels = new Float32Array(voxelArrayBuffer)
+  ctx.update(voxelsBuffer, { offset: 0, data: voxels })
+
+
+  // old compute
 
   // Get a GPU buffer for reading in an unmapped state.
   const gpuReadBuffer = device.createBuffer({

@@ -146,6 +146,9 @@ Context.prototype.vertexBuffer = function(opts) {
   };
   let vertexBuffer = this.device.createBuffer(bufferDescriptor);
   vertexBuffer.setSubData(0, data);
+  vertexBuffer._update = (opts) => {
+    bufferSubData(this.device, vertexBuffer, opts.offset, opts.data)
+  };
 
   return vertexBuffer;
 };
@@ -163,6 +166,9 @@ Context.prototype.indexBuffer = function(opts) {
   };
   let indexBuffer = this.device.createBuffer(bufferDescriptor);
   indexBuffer.setSubData(0, data);
+  indexBuffer._update = (opts) => {
+    bufferSubData(this.device, indexBuffer, opts.offset, opts.data)
+  };
 
   return indexBuffer;
 };
