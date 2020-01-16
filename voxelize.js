@@ -6,7 +6,7 @@ const createContext = require("./context");
 const random = require("pex-random");
 const loadImage = require("./load-image");
 const voxelize = require('voxelize')
-// const voxelize = require('./voxelizeMesh.js')
+// const voxelize = require('./voxelize-mesh.js')
 const {
   perspective: createCamera,
   orbiter: createOrbiter
@@ -40,6 +40,8 @@ const N = gridResolution;
 
 console.time('voxelize on cpu')
 const voxelData = voxelize(mesh.cells, mesh.positions, step)
+// const voxelData = voxelize(mesh.cells, mesh.positions, gridSize, gridResolution)
+console.log('voxelData', voxelData)
 for (var i = 0; i < voxelData.voxels.shape[0]; i++) {
   for (var j = 0; j < voxelData.voxels.shape[1]; j++) {
     for (var k = 0; k < voxelData.voxels.shape[2]; k++) {
@@ -59,10 +61,6 @@ for (var i = 0; i < voxelData.voxels.shape[0]; i++) {
   }
 }
 console.timeEnd('voxelize on cpu')
-
-//[ resolution * i + origin[0], resolution * j + origin[1], resolution * k + origin[2] ]
-
-console.log('voxelData', voxelData)
 
 // for (let i = 0; i < numVoxels; i++) {
 //   let x = i % N;        

@@ -1,16 +1,20 @@
 let N = 64 // voxel grid res.
 let s = 60 // half side length of voxel grid.
 let vs = (2*s) / N // side length of a single voxel
+const aabbTriCollision = require('./aabb-tri.js')
 
 // snap coordinate to voxel grid coordinates.
 function snap(p) {
   return Math.floor(p / vs) + N/2
 }
 
-function voxelizeMesh(cells, positions, size, resolution) {
-  N = resolution
+function voxelizeMesh(cells, positions, size, resolution) {  
+  N = resolution  
   s = size
   vs = (2 * s) / N
+
+  const voxelData = new Float32Array(N * N * N)
+
   // voxelize faces, one after one.
   for(var ic = 0; ic < cells.length; ic++) {
 
@@ -67,13 +71,20 @@ function voxelizeMesh(cells, positions, size, resolution) {
           // http://fileadmin.cs.lth.se/cs/personal/tomas_akenine-moller/code/tribox3.txt
           // if collision, add voxel.
           if(aabbTriCollision(bc, bhs, tv)) {
-            voxelData[(iz * N * N + iy * N + ix) * 4] = 255.0
+            //voxelData[(iz * N * N + iy * N + ix) * 4] = 255.0
+            voxelData[iy * N * N + iz * N + ix] = 1
           }
-
         }
       }
     }
-
+    const result = {
+      voxels: voxelData
+    }
+    result.voxels.shape = [N, N, N]
+    result.voxels.get = function (ix, iy, iz) {
+      return voxelData[iz * N * N + iy * N + ix]
+    }
+    return result
   }
 }
 
