@@ -253,8 +253,8 @@ Context.prototype.sampler = function(opts) {
   const sampler = this.device.createSampler({
     magFilter: opts.min,
     minFilter: opts.mag,
-    addressModeU: "repeat",
-    addressModeV: "repeat",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
     mipmapFilter: opts.mipmap ? "linear" : "nearest"
   });
   return sampler;
@@ -352,11 +352,11 @@ Context.prototype.pipeline = function(opts) {
     colorStates: [
       {
         format: "bgra8unorm",
-        alphaBlend: {
-          srcFactor: "src-alpha",
-          dstFactor: "one-minus-src-alpha",
-          operation: "add"
-        }
+        // alphaBlend: {
+        //   srcFactor: "src-alpha",
+        //   dstFactor: "one-minus-src-alpha",
+        //   operation: "add"
+        // }
       }
     ],
     depthStencilState: {
