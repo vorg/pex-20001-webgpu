@@ -1,5 +1,7 @@
 // Written agains Chrome Canary Version 81.0.4014.0
 
+const isSafari = navigator.vendor.includes("Apple")
+
 function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   this.gpu = gpu;
   this.adapter = adapter;
@@ -13,6 +15,13 @@ function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   document.body.appendChild(this.canvas);
 
   this.webgpuContext = this.canvas.getContext("gpupresent");
+  if (!this.webgpuContext) {
+    // Safari TP Release 99
+    this.webgpuContext = this.canvas.getContext("gpu");
+  }
+  if (!this.webgpuContext) {
+    throw new Error(`WebGPU init failed. Can't get GPU context`)
+  }
 
   const swapChainFormat = "bgra8unorm";
 
@@ -23,7 +32,8 @@ function Context({ width, height, gpu, adapter, device, glslangimpl }) {
   this.swapChain = this.webgpuContext.configureSwapChain(swapChainDescriptor);
 
   this.PixelFormat = {
-    Depth24PlusStencil18: "depth24plus-stencil8"
+    Depth24PlusStencil18: "depth24plus-stencil8",
+    Depth32FloatStencil18: "depth32float-stencil8"
   };
 
   this.Filter = {
@@ -53,7 +63,8 @@ Context.prototype.frame = function(cb) {
       // interrupt render loop
       return;
     }
-    self.device.defaultQueue.submit([self.defaultCommandEncoder.finish()]);
+    const queue = self.device.defaultQueue || self.device.getQueue()
+    queue.submit([self.defaultCommandEncoder.finish()]);
     requestAnimationFrame(frame);
   });
 };
@@ -64,7 +75,10 @@ Context.prototype.submit = function(opts, subpass) {
   if (opts.pass) {
     // TODO: default screen texture injection
     if (!opts.pass.color) {
-      const textureView = this.swapChain.getCurrentTexture().createView();
+      const currentTexture = this.swapChain.getCurrentTexture()
+      let textureView 
+      if (currentTexture.createView) textureView = currentTexture.createView();
+      if (currentTexture.createDefaultView) textureView = currentTexture.createDefaultView();
       opts.pass.colorAttachments[0].attachment = textureView;
     }
     this.passEncoder = commandEncoder.beginRenderPass(opts.pass);
@@ -72,13 +86,17 @@ Context.prototype.submit = function(opts, subpass) {
   const passEncoder = this.passEncoder;
 
   if (opts.attributes) {
-    for (var i = 0; i < opts.attributes.length; i++) {
-      passEncoder.setVertexBuffer(i, opts.attributes[i]);
+    if (isSafari) {
+      passEncoder.setVertexBuffers(0, opts.attributes, [0, 0])
+    } else {
+      for (var i = 0; i < opts.attributes.length; i++) {
+        passEncoder.setVertexBuffer(i, opts.attributes[i]);
+      }
     }
   }
 
   if (opts.indices) {
-    passEncoder.setIndexBuffer(opts.indices);
+    passEncoder.setIndexBuffer(opts.indices, 0);
   }
 
   if (opts.uniforms) {
@@ -145,7 +163,8 @@ Context.prototype.vertexBuffer = function(opts) {
     usage: opts.usage || (GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST)    
   };
   let vertexBuffer = this.device.createBuffer(bufferDescriptor);
-  vertexBuffer.setSubData(0, data);
+  // vertexBuffer.setSubData(0, data); //TODO: remove me
+  bufferSubData(this.device, vertexBuffer, 0, data)
   vertexBuffer._update = (opts) => {
     bufferSubData(this.device, vertexBuffer, opts.offset, opts.data)
   };
@@ -165,7 +184,8 @@ Context.prototype.indexBuffer = function(opts) {
     usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
   };
   let indexBuffer = this.device.createBuffer(bufferDescriptor);
-  indexBuffer.setSubData(0, data);
+  // indexBuffer.setSubData(0, data); //TODO: remove me
+  bufferSubData(this.device, indexBuffer, 0, data)
   indexBuffer._update = (opts) => {
     bufferSubData(this.device, indexBuffer, opts.offset, opts.data)
   };
@@ -179,11 +199,33 @@ Context.prototype.uniformBuffer = function(opts) {
   let bufferDescriptor = {
     size: size,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    // usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.MAP_WRITE
   };
   let uniformBuffer = this.device.createBuffer(bufferDescriptor);  
+  // let [uniformBuffer, arrayBuffer] = this.device.createBufferMapped(bufferDescriptor);  
+  // uniformBuffer.unmap()
   uniformBuffer._update = (opts) => {
     bufferSubData(this.device, uniformBuffer, opts.offset, opts.data)
   };
+
+  return uniformBuffer;
+};
+
+Context.prototype.uniformBufferMapped = function(opts) {
+  let { size } = opts;
+
+  let bufferDescriptor = {
+    size: size,
+    // usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.MAP_WRITE
+  };
+  let uniformBuffer = this.device.createBuffer(bufferDescriptor);  
+  // let [uniformBuffer, arrayBuffer] = this.device.createBufferMapped(bufferDescriptor);  
+  
+  // return [uniformBuffer, arrayBuffer]
+  // uniformBuffer._update = (opts) => {
+  //   bufferSubData(this.device, uniformBuffer, opts.offset, opts.data)
+  // };
 
   return uniformBuffer;
 };
@@ -224,10 +266,14 @@ Context.prototype.shader = function(opts) {
 
 Context.prototype.pass = function(opts) {
   const clearColor = opts.clearColor || [1, 1, 1, 1];
+  const clearColorName = isSafari ? "clearColor" : "loadValue"
+  const clearDepthName = isSafari ? "clearDepth" : "depthLoadValue"
   const renderPassDescriptor = {
     colorAttachments: [
       {
-        loadValue: {
+        loadOp: "clear", //TODO: Safari
+        storeOp: "store", //TODO: Safari
+        [clearColorName]: {  //TODO: Safari
           r: clearColor[0],
           g: clearColor[1],
           b: clearColor[2],
@@ -236,13 +282,13 @@ Context.prototype.pass = function(opts) {
       }
     ],
     depthStencilAttachment: {
-      attachment: opts.depth.createView(),
+      attachment: opts.depth.createView ? opts.depth.createView() : opts.depth.createDefaultView(), //TODO: Safari
       depthLoadOp: "clear",
       depthStoreOp: "store",
       stencilLoadOp: "clear",
       stencilStoreOp: "store",
-      depthLoadValue: 1.0,
-      stencilLoadValue: 1.0
+      [clearDepthName]: 1.0, //TODO: Safari
+      stencilLoadValue: 1.0 //TODO: Safari ?
     }
   };
 
@@ -279,12 +325,15 @@ Context.prototype.bindGroup = function(opts) {
   const bindGroupDescriptor = {
     layout: opts.layout,
     bindings: opts.bindings.map((resource, i) => {
+      let resourceOrView = resource
+      if (resource.createView) resourceOrView = resource.createView()
+      if (resource.createDefaultView) resourceOrView = resource.createDefaultView()
       return {
         binding: i,
-        resource:
-          resource instanceof GPUTexture ? resource.createView() : resource
+        resource: resourceOrView
       };
-    })
+    }),
+    size: opts.size
   };
   const bindGroup = this.device.createBindGroup(bindGroupDescriptor);
   return bindGroup;
@@ -307,8 +356,25 @@ Context.prototype.computePipeline = function(opts) {
 }
 
 Context.prototype.pipeline = function(opts) {
-  let vShaderModule = this.shader({ vertex: opts.vert });
-  let fShaderModule = this.shader({ fragment: opts.frag });
+  let vShaderModule;
+  let fShaderModule;
+
+  console.log('pipeline', opts)
+
+  //TODO: assuming Safari WSL
+  if (opts.shaderWSL) {
+    const shaderModule = this.device.createShaderModule({ code: opts.shaderWSL, isWHLSL: true });
+    console.log('shaderModule', shaderModule)
+    vShaderModule = shaderModule
+    fShaderModule = shaderModule
+  } else {
+    vShaderModule = this.shader({ vertex: opts.vert });
+    fShaderModule = this.shader({ fragment: opts.frag });
+  }
+
+  const vertexStateName = isSafari ? "vertexInput" : "vertexState"
+  const arrayStrideName = isSafari ? "stride" : "arrayStride"
+  const attributesName = isSafari ? "attributeSet" : "attributes"
 
   const pipeline = this.device.createRenderPipeline({
     layout: this.device.createPipelineLayout({
@@ -316,18 +382,19 @@ Context.prototype.pipeline = function(opts) {
     }),
     vertexStage: {
       module: vShaderModule,
-      entryPoint: "main"
+      entryPoint: opts.shaderWSL ? "vertex_main" : "main"
     },
     fragmentStage: {
       module: fShaderModule,
-      entryPoint: "main"
+      entryPoint: opts.shaderWSL ? "fragment_main" : "main"
     },   
-    vertexState: opts.vertexState || {
-      indexFormat: "uint32",
+    [vertexStateName]: opts.vertexState || {
+      // indexFormat: "uint32",
       vertexBuffers: [
         {
-          arrayStride: 3 * 4,
-          attributes: [
+          [arrayStrideName]: 3 * 4,
+          stepMode: "vertex",
+          [attributesName]: [
             {
               // position
               shaderLocation: 0,
@@ -337,8 +404,9 @@ Context.prototype.pipeline = function(opts) {
           ]
         },
         {
-          arrayStride: 2 * 4,
-          attributes: [
+          [arrayStrideName]: 2 * 4,
+          stepMode: "vertex",
+          [attributesName]: [
             {
               // uvs
               shaderLocation: 1,
@@ -352,11 +420,16 @@ Context.prototype.pipeline = function(opts) {
     colorStates: [
       {
         format: "bgra8unorm",
-        // alphaBlend: {
-        //   srcFactor: "src-alpha",
-        //   dstFactor: "one-minus-src-alpha",
-        //   operation: "add"
-        // }
+        alphaBlend: {
+          srcFactor: "src-alpha",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add"
+        },
+        colorBlend: {
+          srcFactor: "src-alpha",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add"
+        }
       }
     ],
     depthStencilState: {
@@ -383,7 +456,7 @@ function bufferSubData(device, destBuffer, destOffset, data) {
   const encoder = device.createCommandEncoder();
   encoder.copyBufferToBuffer(srcBuffer, 0, destBuffer, destOffset, byteCount);
   const commandBuffer = encoder.finish();
-  const queue = device.defaultQueue
+  const queue = device.defaultQueue || device.getQueue()
   queue.submit([commandBuffer]);
   srcBuffer.destroy();
 }
@@ -465,7 +538,9 @@ function createTextureFromImage(device, img, usage) {
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
     });
 
-    textureDataBuffer.setSubData(0, data);
+    // textureDataBuffer.setSubData(0, data); //TODO: remove me
+    bufferSubData(device, textureDataBuffer, 0, data)
+
     const bufferView = {
       buffer: textureDataBuffer,
       rowPitch: rowPitch,
@@ -484,7 +559,8 @@ function createTextureFromImage(device, img, usage) {
     };
     const commandEncoder = device.createCommandEncoder({});
     commandEncoder.copyBufferToTexture(bufferView, textureView, textureExtent);
-    device.defaultQueue.submit([commandEncoder.finish()]);
+    const queue = device.defaultQueue || device.getQueue()
+    queue.submit([commandEncoder.finish()]);
     textureDataBuffer.destroy();
     console.log("mip", mip, "width", width, "height", height);
   }
