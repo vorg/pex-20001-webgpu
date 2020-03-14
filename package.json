@@ -23,8 +23,5 @@
     "ramda": "^0.26.1",
     "voxelize": "^1.0.0"
   },
-  "devDependencies": {
-    "@babel/core": "^7.7.7",
-    "babelify": "^7.3.0"
-  }
+  "devDependencies": {}
 }
